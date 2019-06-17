@@ -1,0 +1,5 @@
+#!/usr/bin/env python
+
+import kcare_qualys
+
+kcare_qualys.main()
