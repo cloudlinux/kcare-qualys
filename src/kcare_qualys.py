@@ -60,7 +60,12 @@ def get_assets(keys):
     for key in keys:
         resp = requests.get(CLN_INFO_URL + "/api/kcare/patchset/" + key)
         resp.raise_for_status()
-        for asset in resp.json()['data']:
+
+        data = resp.json().get('data', [])
+        if not data:
+            logger.warning("There are no servers binded with '{0}' key".format(key))
+
+        for asset in data:
             result = dict(zip(('ip', 'kernel_id', 'patch_level'), asset))
             result['host'] = ''
             yield result
