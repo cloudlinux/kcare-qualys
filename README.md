@@ -1,6 +1,6 @@
 # Kcare-qualys
 
-[![Build Status](https://travis-ci.com/cloudlinux/kcare-qualys.svg?branch=master)](https://travis-ci.com/cloudlinux/kcare-qualys)
+[![Build Status](https://travis-ci.org/cloudlinux/kcare-qualys.svg?branch=master)](https://travis-ci.org/cloudlinux/kcare-qualys)
 
 ## Configuration
 
