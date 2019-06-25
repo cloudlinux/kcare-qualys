@@ -7,19 +7,24 @@ import configparser
 import itertools
 import collections
 import fileinput
+import hashlib
 
 from xml.etree import ElementTree
 
 import requests
 import qualysapi
 
-logging.basicConfig()
+logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s')
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
 PATCHES_INFO_URL = 'https://patches.kernelcare.com'
 CLN_INFO_URL = 'https://cln.cloudlinux.com'
+
+
+class KcareQualysError(Exception):
+    pass
 
 
 def parse_args(args):
@@ -71,6 +76,17 @@ def get_assets(keys):
             yield result
 
 
+def cache_cve(clbl):
+    _CACHE = {}
+    def wrapper(asset):
+        key = "{0}-{1}".format(asset['kernel_id'], asset['patch_level'])
+        if key not in _CACHE:
+            _CACHE[key] = clbl(asset)
+        return _CACHE[key]
+    return wrapper
+
+
+@cache_cve
 def get_cve(asset):
     resp = requests.get(PATCHES_INFO_URL + "/{kernel_id}/{patch_level}/kpatch.info".format(**asset))
     resp.raise_for_status()
@@ -91,11 +107,27 @@ def extract_cve(text):
 def create_search(qgc, cve_list):
     call = "/api/2.0/fo/qid/search_list/dynamic/"
     cve_ids = ','.join(cve_list)
-    parameters = {'action': 'create', 'title': 'CVE-Search-Test8', 'global': '1',
+    search_name = "CVE-Search-" + hashlib.md5(cve_ids.encode('utf-8')).hexdigest()
+
+    # Find already created search list
+    parameters = {'action': 'list', 'show_qids': '0', 'show_option_profiles': '0',
+                  'show_distribution_groups': '0', 'show_report_templates': '0',
+                  'show_remediation_policies': '0'}
+    resp = qgc.request(call, parameters, http_method='get')
+    tree = ElementTree.fromstring(resp)
+    for dlist in tree.findall('./RESPONSE/DYNAMIC_LISTS/DYNAMIC_LIST'):
+        if dlist.find('./TITLE').text == search_name:
+            return dlist.find('./ID').text
+
+    # Create searchlist if it not exists
+    parameters = {'action': 'create', 'title': search_name, 'global': '0',
                   'cve_ids': cve_ids}
     resp = qgc.request(call, parameters)
     tree = ElementTree.fromstring(resp)
-    return tree.find('./RESPONSE/ITEM_LIST/ITEM/VALUE').text
+    value = tree.find('./RESPONSE/ITEM_LIST/ITEM/VALUE')
+    if value is None:
+        raise KcareQualysError("Unexpected result from search_list create: {0}".format(tree))
+    return value.text
 
 
 def get_qid_list(qgc, search_id):
@@ -152,15 +184,22 @@ def patch(args, qgc, keys):
     headers = next(reader)
     writer.writerow(headers)
     cache = collections.defaultdict(set)
+
+    plan = collections.defaultdict(list)
     for asset in get_assets(keys):
         cve_set = get_cve(asset)
+        plan[cve_set].append(asset)
+
+    for cve_set, asset_list in plan.items():
         search_id = create_search(qgc, cve_set)
         try:
             qid_list = set(get_qid_list(qgc, search_id))
-            cache[asset['ip']] = qid_list
-            cache[asset['host']] = qid_list
+            for asset in asset_list:
+                cache[asset['ip']] = qid_list
+                cache[asset['host']] = qid_list
         finally:
             delete_search(qgc, search_id)
+
     for row in reader:
         data = dict(zip(headers, row))
         qid = data['QID']
