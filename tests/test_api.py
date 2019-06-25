@@ -80,7 +80,7 @@ def test_delete_search(qgc):
 @responses.activate
 def test_get_assets():
     responses.add(responses.GET, "https://cln.cloudlinux.com/api/kcare/patchset/test_key",
-            json={'data': [["ip", "kernel_id", "patch_level"]]}, status=200)
+            json={'data': [["ip", "kernel_id", 2]]}, status=200)
     assets = list(kcare_qualys.get_assets(["test_key"]))
     assert len(assets) == 1
 

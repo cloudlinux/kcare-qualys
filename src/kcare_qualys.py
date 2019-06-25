@@ -73,11 +73,13 @@ def get_assets(keys):
         for asset in data:
             result = dict(zip(('ip', 'kernel_id', 'patch_level'), asset))
             result['host'] = ''
-            yield result
+            if result['patch_level'] > 0:
+                yield result
 
 
 def cache_cve(clbl):
     _CACHE = {}
+
     def wrapper(asset):
         key = "{0}-{1}".format(asset['kernel_id'], asset['patch_level'])
         if key not in _CACHE:
@@ -89,8 +91,12 @@ def cache_cve(clbl):
 @cache_cve
 def get_cve(asset):
     resp = requests.get(PATCHES_INFO_URL + "/{kernel_id}/{patch_level}/kpatch.info".format(**asset))
-    resp.raise_for_status()
-    return frozenset(extract_cve(resp.text))
+    if resp.status_code == 404:
+        logger.warning("Kernel `{kernel_id}` with patchlevel {patch_level} was not found".format(**asset))
+    else:
+        resp.raise_for_status()
+        result = frozenset(extract_cve(resp.text))
+        return result
 
 
 def extract_cve(text):
@@ -188,7 +194,8 @@ def patch(args, qgc, keys):
     plan = collections.defaultdict(list)
     for asset in get_assets(keys):
         cve_set = get_cve(asset)
-        plan[cve_set].append(asset)
+        if cve_set:
+            plan[cve_set].append(asset)
 
     for cve_set, asset_list in plan.items():
         search_id = create_search(qgc, cve_set)
