@@ -187,13 +187,21 @@ def patch(args, qgc, keys):
     reader = csv.reader(files_input, dialect='qualys')
     writer = csv.writer(sys.stdout, dialect='qualys')
 
-    headers = next(reader)
-    writer.writerow(headers)
-    cache = collections.defaultdict(set)
+    # Seach headers
+    headers = []
+    while 'QID' not in headers:
+        headers = next(reader)
+        writer.writerow(headers)
 
+    if not headers:
+        raise KcareQualysError("There was no QID column in a report.")
+
+    cache = collections.defaultdict(set)
     plan = collections.defaultdict(list)
     for asset in get_assets(keys):
+        logger.debug("Asset {0} was found.".format(asset))
         cve_set = get_cve(asset)
+        logger.debug("{0} CVEs was found.".format(len(cve_set)))
         if cve_set:
             plan[cve_set].append(asset)
 
@@ -206,13 +214,27 @@ def patch(args, qgc, keys):
                 cache[asset['host']] = qid_list
         finally:
             delete_search(qgc, search_id)
+        logger.debug('{0} QIDs was found for {1}'.format(len(qid_list), asset_list))
 
+    result = collections.defaultdict(list)
     for row in reader:
         data = dict(zip(headers, row))
-        qid = data['QID']
-        qids_to_exclude = cache[data['IP']] | cache[data['DNS Name']]
-        if qid not in qids_to_exclude:
+        if 'QID' in data:
+            qid = data['QID']
+            dns_name = data.get('DNS Name') or data.get('DNS')
+            ip = data['IP']
+            qids_to_exclude = cache[ip] | cache[dns_name]
+            if qid not in qids_to_exclude:
+                writer.writerow(row)
+            else:
+                result[ip].append(qid)
+        else:
+            # Malformed line write as is
             writer.writerow(row)
+
+        for ip, qids in result.items():
+            logger.debug("For `{0}` was ingored: {1}".format(ip, qid))
+
 
 
 def ignore(args, qgc, keys):
