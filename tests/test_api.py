@@ -11,7 +11,7 @@ def qgc():
 
 
 def test_exists_in_qualys(qgc):
-    asset = {'ip': '127.0.0.1'}
+    asset = kcare_qualys.Asset('127.0.0.1', 'kernel-id', 1)
     qgc.request.return_value = """
     <HOST_LIST_OUTPUT >
         <RESPONSE>
@@ -73,8 +73,8 @@ def test_get_qids_list(qgc):
 
 
 def test_delete_search(qgc):
-    result = kcare_qualys.delete_search(qgc, "search_id")
-
+    qgc.request.return_value = ""
+    kcare_qualys.delete_search(qgc, "search_id")
 
 
 @responses.activate
@@ -88,8 +88,9 @@ def test_get_assets():
 @responses.activate
 @mock.patch('kcare_qualys.extract_cve', return_value=set(["CVE1", "CVE2"]))
 def test_get_cve(mock_extract_cve):
-    responses.add(responses.GET, "https://patches.kernelcare.com/1/1/kpatch.info",
+    responses.add(responses.GET, "https://patches.kernelcare.com/kernel-id/1/kpatch.info",
                   body="kpatch info", status=200)
-    cve_list = kcare_qualys.get_cve({"kernel_id": "1", 'patch_level': "1"})
+    asset = kcare_qualys.Asset("ip", "kernel-id", 1)
+    cve_list = kcare_qualys.get_cve(asset)
     mock_extract_cve.assert_called_once_with("kpatch info")
     assert cve_list == set(['CVE1', 'CVE2'])

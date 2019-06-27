@@ -14,9 +14,7 @@ from xml.etree import ElementTree
 import requests
 import qualysapi
 
-logging.basicConfig(format='%(asctime)s %(levelname)-8s %(message)s')
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 PATCHES_INFO_URL = 'https://patches.kernelcare.com'
@@ -25,6 +23,9 @@ CLN_INFO_URL = 'https://cln.cloudlinux.com'
 
 class KcareQualysError(Exception):
     pass
+
+
+Asset = collections.namedtuple('Asset', 'ip kernel_id patch_level')
 
 
 def parse_args(args):
@@ -55,7 +56,7 @@ def parse_args(args):
 
 def exists_in_qualys(qgc, asset):
     call = "/api/2.0/fo/asset/host/"
-    parameters = {"action": "list", "details": "None", "ips": "{ip}".format(**asset)}
+    parameters = {"action": "list", "details": "None", "ips": asset.ip}
     resp = qgc.request(call, parameters)
     tree = ElementTree.fromstring(resp)
     return bool(tree.findall("./RESPONSE/ID_SET/ID"))
@@ -70,18 +71,17 @@ def get_assets(keys):
         if not data:
             logger.warning("There are no servers binded with '{0}' key".format(key))
 
-        for asset in data:
-            result = dict(zip(('ip', 'kernel_id', 'patch_level'), asset))
-            result['host'] = ''
-            if result['patch_level'] > 0:
-                yield result
+        for rec in data:
+            asset = Asset(*rec)
+            if asset.patch_level > 0:
+                yield asset
 
 
 def cache_cve(clbl):
     _CACHE = {}
 
     def wrapper(asset):
-        key = "{0}-{1}".format(asset['kernel_id'], asset['patch_level'])
+        key = (asset.kernel_id, asset.patch_level)
         if key not in _CACHE:
             _CACHE[key] = clbl(asset)
         return _CACHE[key]
@@ -90,9 +90,9 @@ def cache_cve(clbl):
 
 @cache_cve
 def get_cve(asset):
-    resp = requests.get(PATCHES_INFO_URL + "/{kernel_id}/{patch_level}/kpatch.info".format(**asset))
+    resp = requests.get(PATCHES_INFO_URL + "/{0.kernel_id}/{0.patch_level}/kpatch.info".format(asset))
     if resp.status_code == 404:
-        logger.warning("Kernel `{kernel_id}` with patchlevel {patch_level} was not found".format(**asset))
+        logger.warning("Kernel `{0.kernel_id}` with patchlevel {0.patch_level} was not found".format(asset))
     else:
         resp.raise_for_status()
         result = frozenset(extract_cve(resp.text))
@@ -147,7 +147,7 @@ def get_qid_list(qgc, search_id):
 
 def ignore_qid(qgc, asset_list, qid_list):
     call = "ignore_vuln.php"
-    ips = ','.join(asset['ip'] for asset in asset_list)
+    ips = ','.join(asset.ip for asset in asset_list)
 
     # Qualys API accepts only 10 QIP in one query
     args = [qid_list] * 10
@@ -180,6 +180,7 @@ def fetch(args, qgc, keys):
 
 
 def patch(args, qgc, keys):
+    logger.info("Started")
     files_input = fileinput.input(files=args.files if args.files else ('-', ))
     csv.register_dialect('qualys', delimiter=',', quotechar='"',
             quoting=csv.QUOTE_NONNUMERIC)
@@ -189,69 +190,67 @@ def patch(args, qgc, keys):
 
     # Seach headers
     headers = []
+    lineno = 0
     while 'QID' not in headers:
         headers = next(reader)
+        lineno += 1
         writer.writerow(headers)
 
     if not headers:
         raise KcareQualysError("There was no QID column in a report.")
 
     cache = collections.defaultdict(set)
-    plan = collections.defaultdict(list)
+    plan = collections.defaultdict(set)
     for asset in get_assets(keys):
-        logger.debug("Asset {0} was found.".format(asset))
+        logger.info("Asset {0} was found.".format(asset.ip))
         cve_set = get_cve(asset)
-        logger.debug("{0} CVEs was found.".format(len(cve_set)))
         if cve_set:
-            plan[cve_set].append(asset)
+            logger.info("{0} CVEs was found.".format(len(cve_set)))
+            plan[cve_set].add(asset)
 
     for cve_set, asset_list in plan.items():
         search_id = create_search(qgc, cve_set)
         try:
             qid_list = set(get_qid_list(qgc, search_id))
             for asset in asset_list:
-                cache[asset['ip']] = qid_list
-                cache[asset['host']] = qid_list
+                cache[asset.ip] |= qid_list
         finally:
             delete_search(qgc, search_id)
-        logger.debug('{0} QIDs was found for {1}'.format(len(qid_list), asset_list))
+        logger.info('{0} QIDs was found for {1} assets'.format(
+            len(qid_list), len(asset_list)))
 
-    result = collections.defaultdict(list)
-    for row in reader:
+    for lineno, row in enumerate(reader, lineno):
         data = dict(zip(headers, row))
         if 'QID' in data:
-            qid = data['QID']
-            dns_name = data.get('DNS Name') or data.get('DNS')
-            ip = data['IP']
-            qids_to_exclude = cache[ip] | cache[dns_name]
+            qid, ip = data['QID'], data['IP']
+            qids_to_exclude = cache[ip]
             if qid not in qids_to_exclude:
                 writer.writerow(row)
             else:
-                result[ip].append(qid)
+                logger.info("Line {0} was skipped [QID: {1}, ip: {2}]".format(lineno, qid, ip))
         else:
             # Malformed line write as is
             writer.writerow(row)
 
-        for ip, qids in result.items():
-            logger.debug("For `{0}` was ingored: {1}".format(ip, qid))
-
+    logger.info("Done")
 
 
 def ignore(args, qgc, keys):
 
-    plan = collections.defaultdict(list)
+    plan = collections.defaultdict(set)
 
     # Each asset (server) should be processed individually and group it by set of CVEs
     for asset in get_assets(keys):
+
         if not exists_in_qualys(qgc, asset):
-            logger.warning("Asset {host} ({ip}) was not found as Qualy host. Skipped".format(**asset))
+            logger.warning("Asset `{0}` was not found as Qualy host. Skipped".format(asset))
             continue
-        logger.info("Asset founded {host}({ip})".format(**asset))
-        logger.debug("Asset kernel: {kernel_id}-{patch_level}".format(**asset))
+
+        logger.info("Asset founded {0}".format(asset))
         cve_set = get_cve(asset)
         logger.info("CVE was found: {0}".format(len(cve_set)))
         logger.debug("CVE list: {0}".format(cve_set))
-        plan[cve_set].append(asset)
+        plan[cve_set].add(asset)
 
     for cve_set, asset_list in plan.items():
         search_id = create_search(qgc, cve_set)
@@ -265,18 +264,24 @@ def ignore(args, qgc, keys):
             logger.debug("Dyanmic search list removed: {0}".format(search_id))
 
 
+def setup_logging(args):
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+
+    verbose_level = logging.INFO if args.verbose else logging.ERROR
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(verbose_level)
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+
 def main():
     args = parse_args(sys.argv[1:])
-
-    if args.verbose:
-        logger.setLevel(logging.DEBUG)
+    setup_logging(args)
 
     config = configparser.ConfigParser()
     config.read(args.configfile)
-
-    if config.has_option("kernelcare", "patches-info"):
-        global PATCHES_INFO_URL
-        PATCHES_INFO_URL = config.get('kernelcare', 'patches-info').rstrip('/')
 
     if config.has_option("kernelcare", "cln-info"):
         global CLN_INFO_URL
