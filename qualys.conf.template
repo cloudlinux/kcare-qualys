@@ -7,7 +7,6 @@ password = xxxxxxxx
 
 keys = key1,key2,keyN
 
-## When eportal is used you should redefine API endpoints
-# patches-info = https://eportal.example.com/
+## When eportal is used you should redefine API endpoint
 # cln-info = https://eportal.example.com/admin/
 
