@@ -11,7 +11,7 @@ def qgc():
 
 
 def test_exists_in_qualys(qgc):
-    asset = kcare_qualys.Asset('127.0.0.1', 'kernel-id', 1)
+    asset = kcare_qualys.Asset('hostname', '127.0.0.1', 'kernel-id', 1)
     qgc.request.return_value = """
     <HOST_LIST_OUTPUT >
         <RESPONSE>
@@ -79,10 +79,29 @@ def test_delete_search(qgc):
 
 @responses.activate
 def test_get_assets():
-    responses.add(responses.GET, "https://cln.cloudlinux.com/api/kcare/patchset/test_key",
-            json={'data': [["ip", "kernel_id", 2]]}, status=200)
+    responses.add(
+        responses.GET,
+        "https://cln.cloudlinux.com/api/kcare/patchset.json?key=test_key",
+        json=[{
+            "ip": "127.0.0.1",
+            "host": "my.example.com",
+            "kernel_id": "kernel-id",
+            "patch_level": 1}],
+        status=200
+    )
     assets = list(kcare_qualys.get_assets(["test_key"]))
     assert len(assets) == 1
+
+    with mock.patch('kcare_qualys.CLN_INFO_URL', "http://eportal.example.com"):
+        responses.add(
+            responses.GET,
+            "http://eportal.example.com/api/kcare/patchset/test_key",
+            json={'data': [["127.0.0.1", "kernel_id", 2]]},
+            status=200
+        )
+        assets = list(kcare_qualys.get_assets(["test_key"]))
+        assert len(assets) == 1
+
 
 
 @responses.activate
@@ -90,7 +109,7 @@ def test_get_assets():
 def test_get_cve(mock_extract_cve):
     responses.add(responses.GET, "https://patches.kernelcare.com/kernel-id/1/kpatch.info",
                   body="kpatch info", status=200)
-    asset = kcare_qualys.Asset("ip", "kernel-id", 1)
+    asset = kcare_qualys.Asset("host", "ip", "kernel-id", 1)
     cve_list = kcare_qualys.get_cve(asset)
     mock_extract_cve.assert_called_once_with("kpatch info")
     assert cve_list == set(['CVE1', 'CVE2'])
