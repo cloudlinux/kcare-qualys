@@ -8,6 +8,7 @@ import itertools
 import collections
 import fileinput
 import hashlib
+import tempfile
 
 from xml.etree import ElementTree
 
@@ -183,23 +184,6 @@ def patch(args, qgc, keys):
     """ Entrypoint for patch command.
     """
     logger.info("Started")
-    files_input = fileinput.input(files=args.files if args.files else ('-', ))
-    csv.register_dialect('qualys', delimiter=',', quotechar='"',
-            quoting=csv.QUOTE_NONNUMERIC)
-
-    reader = csv.reader(files_input, dialect='qualys')
-    writer = csv.writer(sys.stdout, dialect='qualys')
-
-    # Seach headers
-    headers = []
-    lineno = 0
-    while 'QID' not in headers:
-        headers = next(reader)
-        lineno += 1
-        writer.writerow(headers)
-
-    if not headers:
-        raise KcareQualysError("There was no QID column in a report.")
 
     cache = collections.defaultdict(set)
     plan = collections.defaultdict(set)
@@ -223,20 +207,44 @@ def patch(args, qgc, keys):
         logger.info('{0} QIDs was found for {1} assets'.format(
             len(qid_list), len(asset_list)))
 
-    for lineno, row in enumerate(reader, lineno):
-        data = dict(zip(headers, row))
-        if 'QID' in data:
-            qid, ip = data['QID'], data['IP']
-            dns_name = data.get('DNS Name') or data.get("DNS")
-            qids_to_exclude = cache[ip] | cache[dns_name]
-            if qid not in qids_to_exclude:
-                writer.writerow(row)
-            else:
-                logger.info("Line {0} was skipped [QID: {1}, ip: {2}]".format(lineno, qid, ip))
-        else:
-            # Malformed line write as is
-            writer.writerow(row)
+    files_input = fileinput.input(files=args.files if args.files else ('-', ))
+    csv.register_dialect('qualys', delimiter=',', quotechar='"',
+            quoting=csv.QUOTE_NONNUMERIC)
 
+    orig_fd, orig = tempfile.mkstemp(prefix='kcare-qualys-', suffix='.csv')
+    with open(orig_fd, 'w', newline='\r\n') as orig_file:
+        reader = csv.reader(files_input, dialect='qualys')
+        writer = csv.writer(orig_file, dialect='qualys')
+
+        # Seach headers
+        headers = []
+        while 'QID' not in headers:
+            headers = next(reader)
+            writer.writerow(headers)
+
+        if not headers:
+            raise KcareQualysError("There was no QID column in a report.")
+
+        for row in reader:
+            data = dict(zip(headers, row))
+            if 'QID' in data:
+                qid, ip = data['QID'], data['IP']
+                dns_name = data.get('DNS Name') or data.get("DNS")
+                qids_to_exclude = cache[ip] | cache[dns_name]
+                if qid not in qids_to_exclude:
+                    writer.writerow(row)
+                else:
+                    logger.info("Line {0} was skipped [QID: {1}, ip: {2}]".format(reader.line_num, qid, ip))
+            else:
+                # Malformed line write as is
+                writer.writerow(row)
+
+    with open(orig, 'r', newline='\r\n') as orig_file:
+        for idx, line in enumerate(orig_file):
+            line = line.replace('"",', ',')
+            sys.stdout.write(line)
+
+    os.unlink(orig)
     logger.info("Done")
 
 
