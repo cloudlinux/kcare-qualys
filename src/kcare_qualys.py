@@ -212,7 +212,7 @@ def patch(args, qgc, keys):
             quoting=csv.QUOTE_NONNUMERIC)
 
     orig_fd, orig = tempfile.mkstemp(prefix='kcare-qualys-', suffix='.csv')
-    with open(orig_fd, 'w', newline='\r\n') as orig_file:
+    with open(orig_fd, 'w', newline='') as orig_file:
         reader = csv.reader(files_input, dialect='qualys')
         writer = csv.writer(orig_file, dialect='qualys')
 
