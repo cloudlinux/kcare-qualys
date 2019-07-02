@@ -8,6 +8,7 @@ import itertools
 import collections
 import fileinput
 import hashlib
+import tempfile
 
 from xml.etree import ElementTree
 
@@ -210,35 +211,40 @@ def patch(args, qgc, keys):
     csv.register_dialect('qualys', delimiter=',', quotechar='"',
             quoting=csv.QUOTE_NONNUMERIC)
 
-    reader = csv.reader(files_input, dialect='qualys')
-    writer = csv.writer(sys.stdout, dialect='qualys')
-    f = open('/tmp/patches_orig.csv', 'wb')
-    writer_original = csv.writer(f, dialect='qualys')
+    orig_fd, orig = tempfile.mkstemp(prefix='kcare-qualys-', suffix='.csv')
+    with open(orig_fd, 'w', newline='\r\n') as orig_file:
+        reader = csv.reader(files_input, dialect='qualys')
+        writer = csv.writer(orig_file, dialect='qualys')
 
-    # Seach headers
-    headers = []
-    while 'QID' not in headers:
-        headers = next(reader)
-        writer.writerow(headers)
+        # Seach headers
+        headers = []
+        while 'QID' not in headers:
+            headers = next(reader)
+            writer.writerow(headers)
 
-    if not headers:
-        raise KcareQualysError("There was no QID column in a report.")
+        if not headers:
+            raise KcareQualysError("There was no QID column in a report.")
 
-    for row in reader:
-        writer_original.writerow(row)
-        data = dict(zip(headers, row))
-        if 'QID' in data:
-            qid, ip = data['QID'], data['IP']
-            dns_name = data.get('DNS Name') or data.get("DNS")
-            qids_to_exclude = cache[ip] | cache[dns_name]
-            if qid not in qids_to_exclude:
-                writer.writerow(row)
+        for row in reader:
+            data = dict(zip(headers, row))
+            if 'QID' in data:
+                qid, ip = data['QID'], data['IP']
+                dns_name = data.get('DNS Name') or data.get("DNS")
+                qids_to_exclude = cache[ip] | cache[dns_name]
+                if qid not in qids_to_exclude:
+                    writer.writerow(row)
+                else:
+                    logger.info("Line {0} was skipped [QID: {1}, ip: {2}]".format(reader.line_num, qid, ip))
             else:
-                logger.info("Line {0} was skipped [QID: {1}, ip: {2}]".format(reader.line_num, qid, ip))
-        else:
-            # Malformed line write as is
-            writer.writerow(row)
+                # Malformed line write as is
+                writer.writerow(row)
 
+    with open(orig, 'r', newline='\r\n') as orig_file:
+        for idx, line in enumerate(orig_file):
+            line = line.replace('"",', ',')
+            sys.stdout.write(line)
+
+    os.unlink(orig)
     logger.info("Done")
 
 
@@ -308,29 +314,8 @@ def parse_args(args):
                               help='reports to fetch')
     parser_fetch.add_argument('-O', '--output', default="")
     parser_fetch.set_defaults(func=fetch)
-
-    parser_test = subparsers.add_parser('test')
-    parser_test.set_defaults(func=test)
-    parser_test.add_argument('files', metavar='FILE', nargs='*')
     return parser.parse_args(args)
 
-
-def test(args, qgc, keys):
-    files_input = fileinput.input(files=args.files if args.files else ('-', ))
-    csv.register_dialect('qualys', delimiter=',', quotechar='"', quoting=csv.QUOTE_ALL)
-
-    result = []
-    for line in files_input:
-        result.append(line)
-
-    for line in result:
-        print([line,])
-
-    reader = csv.reader(result, dialect='qualys')
-    writer = csv.writer(sys.stdout, dialect='qualys')
-
-    for rec in reader:
-        print(rec, result[0])
 
 def main():
     args = parse_args(sys.argv[1:])
