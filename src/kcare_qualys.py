@@ -183,23 +183,6 @@ def patch(args, qgc, keys):
     """ Entrypoint for patch command.
     """
     logger.info("Started")
-    files_input = fileinput.input(files=args.files if args.files else ('-', ))
-    csv.register_dialect('qualys', delimiter=',', quotechar='"',
-            quoting=csv.QUOTE_NONNUMERIC)
-
-    reader = csv.reader(files_input, dialect='qualys')
-    writer = csv.writer(sys.stdout, dialect='qualys')
-
-    # Seach headers
-    headers = []
-    lineno = 0
-    while 'QID' not in headers:
-        headers = next(reader)
-        lineno += 1
-        writer.writerow(headers)
-
-    if not headers:
-        raise KcareQualysError("There was no QID column in a report.")
 
     cache = collections.defaultdict(set)
     plan = collections.defaultdict(set)
@@ -223,7 +206,26 @@ def patch(args, qgc, keys):
         logger.info('{0} QIDs was found for {1} assets'.format(
             len(qid_list), len(asset_list)))
 
-    for lineno, row in enumerate(reader, lineno):
+    files_input = fileinput.input(files=args.files if args.files else ('-', ))
+    csv.register_dialect('qualys', delimiter=',', quotechar='"',
+            quoting=csv.QUOTE_NONNUMERIC)
+
+    reader = csv.reader(files_input, dialect='qualys')
+    writer = csv.writer(sys.stdout, dialect='qualys')
+    f = open('/tmp/patches_orig.csv', 'wb')
+    writer_original = csv.writer(f, dialect='qualys')
+
+    # Seach headers
+    headers = []
+    while 'QID' not in headers:
+        headers = next(reader)
+        writer.writerow(headers)
+
+    if not headers:
+        raise KcareQualysError("There was no QID column in a report.")
+
+    for row in reader:
+        writer_original.writerow(row)
         data = dict(zip(headers, row))
         if 'QID' in data:
             qid, ip = data['QID'], data['IP']
@@ -232,7 +234,7 @@ def patch(args, qgc, keys):
             if qid not in qids_to_exclude:
                 writer.writerow(row)
             else:
-                logger.info("Line {0} was skipped [QID: {1}, ip: {2}]".format(lineno, qid, ip))
+                logger.info("Line {0} was skipped [QID: {1}, ip: {2}]".format(reader.line_num, qid, ip))
         else:
             # Malformed line write as is
             writer.writerow(row)
@@ -306,8 +308,29 @@ def parse_args(args):
                               help='reports to fetch')
     parser_fetch.add_argument('-O', '--output', default="")
     parser_fetch.set_defaults(func=fetch)
+
+    parser_test = subparsers.add_parser('test')
+    parser_test.set_defaults(func=test)
+    parser_test.add_argument('files', metavar='FILE', nargs='*')
     return parser.parse_args(args)
 
+
+def test(args, qgc, keys):
+    files_input = fileinput.input(files=args.files if args.files else ('-', ))
+    csv.register_dialect('qualys', delimiter=',', quotechar='"', quoting=csv.QUOTE_ALL)
+
+    result = []
+    for line in files_input:
+        result.append(line)
+
+    for line in result:
+        print([line,])
+
+    reader = csv.reader(result, dialect='qualys')
+    writer = csv.writer(sys.stdout, dialect='qualys')
+
+    for rec in reader:
+        print(rec, result[0])
 
 def main():
     args = parse_args(sys.argv[1:])
