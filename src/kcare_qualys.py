@@ -1,4 +1,5 @@
 import os
+import io
 import sys
 import csv
 import argparse
@@ -211,8 +212,16 @@ def patch(args, qgc, keys):
     csv.register_dialect('qualys', delimiter=',', quotechar='"',
             quoting=csv.QUOTE_NONNUMERIC)
 
-    orig_fd, orig = tempfile.mkstemp(prefix='kcare-qualys-', suffix='.csv')
-    with open(orig_fd, 'w', newline='') as orig_file:
+    _, orig = tempfile.mkstemp(prefix='kcare-qualys-', suffix='.csv')
+
+    import functools
+
+    if sys.version_info.major < 3:
+        pyopen = functools.partial(open, orig, 'wb')
+    else:
+        pyopen = functools.partial(open, orig, 'w', newline='')
+
+    with pyopen() as orig_file:
         reader = csv.reader(files_input, dialect='qualys')
         writer = csv.writer(orig_file, dialect='qualys')
 
@@ -239,7 +248,7 @@ def patch(args, qgc, keys):
                 # Malformed line write as is
                 writer.writerow(row)
 
-    with open(orig, 'r', newline='\r\n') as orig_file:
+    with io.open(orig, 'r', newline='\r\n') as orig_file:
         for idx, line in enumerate(orig_file):
             line = line.replace('"",', ',')
             sys.stdout.write(line)
