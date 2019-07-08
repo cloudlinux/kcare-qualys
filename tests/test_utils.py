@@ -1,4 +1,6 @@
 import pytest
+import mock
+import requests
 
 import kcare_qualys
 
@@ -13,3 +15,17 @@ import kcare_qualys
 ])
 def test_extract_cve(test_input, expected):
     assert kcare_qualys.extract_cve(test_input) == expected
+
+
+def test_filter_empty_quotes(tmpdir):
+    infile = tmpdir.join('input.csv')
+    infile.write('"test","","", "test"')
+    result = list(kcare_qualys.filter_empty_quotes(str(infile)))
+    assert result == ['"test",,, "test"']
+
+
+def test_connection_wrapper():
+    qgc = mock.Mock()
+    qgc.request.side_effect = requests.exceptions.ConnectionError
+    with pytest.raises(kcare_qualys.KcareQualysError):
+        kcare_qualys.delete_search(qgc, 'test')
