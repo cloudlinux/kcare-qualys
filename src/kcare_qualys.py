@@ -223,19 +223,19 @@ def get_qid_map(qgc, keys):
     return result
 
 
-def get_filtered(reader, qid_map):
+def get_filtered(reader, qid_map, mark_only):
     # Seach headers
-    headers = []
-    while 'QID' not in headers:
-        try:
-            headers = next(reader)
-        except StopIteration:
-            headers = []
-            break
+    headers = next(reader, None)
+    while headers is not None and 'QID' not in headers:
         yield headers
+        headers = next(reader, None)
 
     if not headers:
         raise KcareQualysError("There was no QID column in a report.")
+
+    if mark_only:
+        headers.append("KC Patched")
+    yield headers
 
     for row in reader:
         data = dict(zip(headers, row))
@@ -244,10 +244,16 @@ def get_filtered(reader, qid_map):
             dns_name = data.get('DNS Name') or data.get("DNS")
             qids_to_exclude = qid_map[ip] | qid_map[dns_name]
             if qid not in qids_to_exclude:
+                if mark_only:
+                    row.append('no')
                 yield row
             else:
-                logger.info("Line {0} was skipped [QID: {1}, ip: {2}]".format(
-                    reader.line_num, qid, ip))
+                if mark_only:
+                    row.append('yes')
+                    yield row
+                else:
+                    logger.info("Line {0} was skipped [QID: {1}, ip: {2}]".format(
+                        reader.line_num, qid, ip))
         else:
             # Malformed line write as is
             yield row
@@ -282,7 +288,7 @@ def patch(args, qgc, keys):
     with open(*oargs, **okwargs) as orig_file:
         reader = csv.reader(files_input, dialect='qualys')
         writer = csv.writer(orig_file, dialect='qualys')
-        for row in get_filtered(reader, qid_map):
+        for row in get_filtered(reader, qid_map, args.mark_only):
             writer.writerow(row)
 
     for line in filter_empty_quotes(orig):
@@ -352,6 +358,8 @@ def parse_args(args):
     parser_patch.set_defaults(func=patch)
     parser_patch.add_argument('files', metavar='FILE', nargs='*',
                               help='reports to patch, if empty, stdin is used')
+    parser_patch.add_argument("-m", "--mark-only", help="mark lines as patches, not exclude",
+                        action="store_true")
 
     parser_fetch = subparsers.add_parser('fetch')
     parser_fetch.add_argument('refs', metavar='REF', nargs='*',
