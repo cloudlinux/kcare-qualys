@@ -73,7 +73,7 @@ def eportal_source(key):
         logger.warning("There are no servers binded with '{0}' key".format(key))
 
     for rec in data:
-        asset = Asset(*[None]+rec)
+        asset = Asset(*[None] + rec)
         if asset.patch_level > 0:
             yield asset
 
@@ -104,8 +104,8 @@ def get_cve(asset):
     patch_path = "/{0.kernel_id}/{0.patch_level}/kpatch.info".format(asset)
     resp = requests.get(PATCHES_INFO_URL + patch_path)
     if resp.status_code == 404:  # pragma: no cover
-        logger.warning("Kernel `{0.kernel_id}` with patchlevel {0.patch_level} was not found. "
-                       "Asset {0.ip} ({0.host}) skipped".format(asset))
+        logger.warning("Kernel `{0.kernel_id}` with patchlevel {0.patch_level} was not "
+                       "found. Asset {0.ip} ({0.host}) skipped".format(asset))
     else:
         resp.raise_for_status()
         result = frozenset(extract_cve(resp.text))
@@ -192,10 +192,66 @@ def fetch(args, qgc, keys):
             'output_format': 'csv',
         }
         report = qgc.request(call, parameters)
-        report_filename = os.path.join(args.output, ref.replace('/', '-')+'.csv')
+        report_filename = os.path.join(args.output, ref.replace('/', '-') + '.csv')
         with open(report_filename, 'w') as rf:
             rf.write(report)
         logger.info("{0} was saved".format(report_filename))
+
+
+def get_latest(kernel):
+    patch_path = "/{0}/latest.v2".format(kernel)
+    resp = requests.get(PATCHES_INFO_URL + patch_path)
+    resp.raise_for_status()
+    return int(resp.text)
+
+
+# @connection_wrapper
+def summary(args, qgc, keys):
+
+    if args.files:
+        files_input = fileinput.input(files=args.files)
+        reader = csv.reader(files_input, delimiter=',', quotechar='"')
+
+        headers = next(reader, None)
+        while headers is not None and 'QID' not in headers:
+            headers = next(reader, None)
+
+        report_assets = {}
+        for row in reader:
+            data = dict(zip(headers, row))
+            if 'QID' in data:
+                ip, dns_name = data['IP'], data.get('DNS Name') or data.get("DNS")
+                report_assets[ip] = (ip, dns_name)
+                report_assets[dns_name] = (ip, dns_name)
+
+    writer = csv.writer(sys.stdout)
+    for asset in get_assets(keys):
+        cve_set = get_cve(asset) or frozenset()
+        rec = [asset.host, asset.ip, ', '.join(cve_set)]
+
+        if asset.ip in report_assets:
+            ip, dns_name = report_assets[asset.ip]
+        if asset.host in report_assets:
+            ip, dns_name = report_assets[asset.host]
+        report_assets.pop(ip, None)
+        report_assets.pop(dns_name, None)
+
+        latest = get_latest(asset.kernel_id)
+        if latest > asset.patch_level:
+            latest_asset = Asset(asset.host, asset.ip, asset.kernel_id, latest)
+            latest_cve_set = get_cve(latest_asset)
+            rec.append('not patched')
+            rec.append("Asset {0.ip} ({0.host}) is not fully updated. Patch "
+                       "level is {0.patch_level} while latest is {1}. CVEs that"
+                       " could be patched but not: {2}.".format(
+                           asset, latest, ', '.join(latest_cve_set - cve_set)))
+        else:
+            rec.append('patched')
+        writer.writerow(rec)
+    for host, ip in report_assets.values:
+        rec = [host, ip, '', 'not patched', "Not registered"]
+        writer.writerow(rec)
+
 
 
 def get_qid_map(qgc, keys):
@@ -358,14 +414,21 @@ def parse_args(args):
     parser_patch.set_defaults(func=patch)
     parser_patch.add_argument('files', metavar='FILE', nargs='*',
                               help='reports to patch, if empty, stdin is used')
-    parser_patch.add_argument("-m", "--mark-only", help="mark lines as patches, not exclude",
-                        action="store_true")
+    parser_patch.add_argument("-m", "--mark-only", action="store_true",
+                              help="mark lines as patches, not exclude")
 
     parser_fetch = subparsers.add_parser('fetch')
     parser_fetch.add_argument('refs', metavar='REF', nargs='*',
                               help='reports to fetch')
     parser_fetch.add_argument('-O', '--output', default="")
     parser_fetch.set_defaults(func=fetch)
+
+    parser_summary = subparsers.add_parser('summary')
+    parser_summary.add_argument('files', metavar='FILE', nargs='*',
+                                help='reports to be source of assets, '
+                                'if empty, stdin is used')
+    parser_summary.set_defaults(func=summary)
+
     return parser.parse_args(args)
 
 
