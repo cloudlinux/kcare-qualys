@@ -95,6 +95,8 @@ def cache_cve(clbl):
         key = (asset.kernel_id, asset.patch_level)
         if key not in _CACHE:
             _CACHE[key] = clbl(asset)
+        else:
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1111")
         return _CACHE[key]
     return wrapper
 
@@ -205,7 +207,7 @@ def get_latest(kernel):
     return int(resp.text)
 
 
-# @connection_wrapper
+@connection_wrapper
 def summary(args, qgc, keys):
 
     if args.files:
