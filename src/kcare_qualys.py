@@ -205,7 +205,7 @@ def get_latest(kernel):
     return int(resp.text)
 
 
-# @connection_wrapper
+@connection_wrapper
 def summary(args, qgc, keys):
 
     if args.files:
