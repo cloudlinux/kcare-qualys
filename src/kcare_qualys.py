@@ -208,6 +208,8 @@ def get_latest(kernel):
 @connection_wrapper
 def summary(args, qgc, keys):
 
+    report_assets = {}
+
     if args.files:
         files_input = fileinput.input(files=args.files)
         reader = csv.reader(files_input, delimiter=',', quotechar='"')
@@ -216,7 +218,6 @@ def summary(args, qgc, keys):
         while headers is not None and 'QID' not in headers:
             headers = next(reader, None)
 
-        report_assets = {}
         for row in reader:
             data = dict(zip(headers, row))
             if 'QID' in data:
@@ -248,10 +249,10 @@ def summary(args, qgc, keys):
         else:
             rec.append('patched')
         writer.writerow(rec)
-    for host, ip in report_assets.values:
+
+    for host, ip in report_assets.values():
         rec = [host, ip, '', 'not patched', "Not registered"]
         writer.writerow(rec)
-
 
 
 def get_qid_map(qgc, keys):
