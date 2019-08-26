@@ -230,27 +230,29 @@ def summary(args, qgc, keys):
         cve_set = get_cve(asset) or frozenset()
         rec = [asset.host, asset.ip, ', '.join(cve_set)]
 
+        ip = dns_name = None
+
         if asset.ip in report_assets:
             ip, dns_name = report_assets[asset.ip]
         if asset.host in report_assets:
             ip, dns_name = report_assets[asset.host]
-        report_assets.pop(ip, None)
-        report_assets.pop(dns_name, None)
 
-        latest = get_latest(asset.kernel_id)
-        if latest > asset.patch_level:
-            latest_asset = Asset(asset.host, asset.ip, asset.kernel_id, latest)
-            latest_cve_set = get_cve(latest_asset)
-            rec.append('not patched')
-            rec.append("Asset {0.ip} ({0.host}) is not fully updated. Patch "
-                       "level is {0.patch_level} while latest is {1}. CVEs that"
-                       " could be patched but not: {2}.".format(
-                           asset, latest, ', '.join(latest_cve_set - cve_set)))
-        else:
-            rec.append('patched')
-        writer.writerow(rec)
+        was_in_report = [report_assets.pop(ip, None), report_assets.pop(dns_name, None)]
+        if any(was_in_report):
+            latest = get_latest(asset.kernel_id)
+            if latest > asset.patch_level:
+                latest_asset = Asset(asset.host, asset.ip, asset.kernel_id, latest)
+                latest_cve_set = get_cve(latest_asset)
+                rec.append('not patched')
+                rec.append("Asset {0.ip} ({0.host}) is not fully updated. Patch "
+                           "level is {0.patch_level} while latest is {1}. CVEs that"
+                           " could be patched but not: {2}.".format(
+                               asset, latest, ', '.join(latest_cve_set - cve_set)))
+            else:
+                rec.append('patched')
+            writer.writerow(rec)
 
-    for host, ip in report_assets.values():
+    for host, ip in set(report_assets.values()):
         rec = [host, ip, '', 'not patched', "Not registered"]
         writer.writerow(rec)
 
