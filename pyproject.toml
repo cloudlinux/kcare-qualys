@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "kcare-qualys"
-version = "0.1.16"
+version = "0.1.17"
 description = "The script marks vulnerabilities detected by Qualys, but patched by KernelCare as exceptions"
 authors = ["Rinat Sabitov <rsabitov@cloudlinux.com>"]
 license = "Apache-2.0"
