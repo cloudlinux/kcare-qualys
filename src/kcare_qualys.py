@@ -234,23 +234,18 @@ def summary(args, qgc, keys):
             if 'QID' in data:
                 ip, dns_name = data['IP'], data.get('DNS Name') or data.get("DNS")
                 report_assets[ip] = (ip, dns_name)
-                report_assets[dns_name] = (ip, dns_name)
 
     writer = csv.writer(sys.stdout)
     for asset in get_assets(keys):
         cve_set = get_cve(asset) or frozenset()
         rec = [asset.host, asset.ip, ', '.join(cve_set)]
-
-        ids = report_assets.get(asset.ip, ()) + report_assets.get(asset.host, ())
-        was_in_report = [report_assets.pop(id_, None) for id_ in ids]
-
-        if any(was_in_report):
+        if report_assets.pop(asset.ip, None):
             latest = get_latest(asset.kernel_id)
             if latest > asset.patch_level:
                 latest_asset = Asset(asset.host, asset.ip, asset.kernel_id, latest)
                 latest_cve_set = get_cve(latest_asset)
                 rec.append('not patched')
-                rec.append("Asset {0.ip} ({0.host}) is not fully updated. Patch "
+                rec.append("Asset {0.ip} is not fully updated. Patch "
                            "level is {0.patch_level} while latest is {1}. CVEs that"
                            " could be patched but not: {2}.".format(
                                asset, latest, ', '.join(latest_cve_set - cve_set)))
