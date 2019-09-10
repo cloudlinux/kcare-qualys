@@ -198,6 +198,17 @@ def fetch(args, qgc, keys):
         logger.info("{0} was saved".format(report_filename))
 
 
+def cache_latest(clbl):
+    _CACHE = {}
+    @functools.wraps(clbl)
+    def wrapper(kernel):
+        if kernel not in _CACHE:
+            _CACHE[kernel] = clbl(kernel)
+        return _CACHE[kernel]
+    return wrapper
+
+
+@cache_latest
 def get_latest(kernel):
     patch_path = "/{0}/latest.v2".format(kernel)
     resp = requests.get(PATCHES_INFO_URL + patch_path)
@@ -230,14 +241,9 @@ def summary(args, qgc, keys):
         cve_set = get_cve(asset) or frozenset()
         rec = [asset.host, asset.ip, ', '.join(cve_set)]
 
-        ip = dns_name = None
+        ids = report_assets.get(asset.ip, ()) + report_assets.get(asset.host, ())
+        was_in_report = [report_assets.pop(id_, None) for id_ in ids]
 
-        if asset.ip in report_assets:
-            ip, dns_name = report_assets[asset.ip]
-        if asset.host in report_assets:
-            ip, dns_name = report_assets[asset.host]
-
-        was_in_report = [report_assets.pop(ip, None), report_assets.pop(dns_name, None)]
         if any(was_in_report):
             latest = get_latest(asset.kernel_id)
             if latest > asset.patch_level:
@@ -252,7 +258,7 @@ def summary(args, qgc, keys):
                 rec.append('patched')
             writer.writerow(rec)
 
-    for host, ip in set(report_assets.values()):
+    for ip, host in set(report_assets.values()):
         rec = [host, ip, '', 'not patched', "Not registered"]
         writer.writerow(rec)
 
