@@ -146,7 +146,7 @@ def create_search(qgc, cve_list):
     tree = ElementTree.fromstring(resp)
     value = tree.find('./RESPONSE/ITEM_LIST/ITEM/VALUE')
     if value is None:
-        raise KcareQualysError("Unexpected result from search_list create: {0}".format(tree))
+        raise KcareQualysError("Unexpected result from search_list create: {0}".format(resp))
     return value.text
 
 
