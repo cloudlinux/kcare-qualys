@@ -127,7 +127,9 @@ def extract_cve(text):
 def create_search(qgc, cve_list):
     call = "/api/2.0/fo/qid/search_list/dynamic/"
     cve_ids = ','.join(cve_list)
-    search_name = "CVE-Search-" + hashlib.md5(cve_ids.encode('utf-8')).hexdigest()
+    username, _ = qgc.auth
+    search_name = "CVE-Search-{0}-{1}".format(
+        username, hashlib.md5(cve_ids.encode('utf-8')).hexdigest())
 
     # Find already created search list
     parameters = {'action': 'list', 'show_qids': '0', 'show_option_profiles': '0',

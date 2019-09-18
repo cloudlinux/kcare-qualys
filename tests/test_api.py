@@ -8,7 +8,7 @@ import kcare_qualys
 
 @pytest.fixture
 def qgc():
-    return mock.Mock()
+    return mock.Mock(auth=('username', 'password'))
 
 
 def test_exists_in_qualys(qgc):
